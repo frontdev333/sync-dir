@@ -9,7 +9,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 )
+
+type FileResult struct {
+	Path string
+	Hash string
+}
 
 func GetFilePath() (string, error) {
 	if len(os.Args) < 2 {
@@ -20,8 +26,8 @@ func GetFilePath() (string, error) {
 	return pth[0], nil
 }
 
-func ListFiles(rootPath string) (map[string]string, error) {
-	res := make(map[string]string)
+func ListFiles(res chan<- string, rootPath string) {
+	defer close(res)
 	err := filepath.WalkDir(rootPath, func(pth string, d fs.DirEntry, err error) error {
 
 		if err != nil {
@@ -32,39 +38,47 @@ func ListFiles(rootPath string) (map[string]string, error) {
 			return nil
 		}
 
-		fileHash, err := HashFile(pth)
+		res <- pth
+		return nil
+	})
+
+	if err != nil {
+		slog.Error(err.Error())
+	}
+}
+
+func HashFile(wg *sync.WaitGroup, res chan<- FileResult, tasks <-chan string, rootPath string) {
+	defer wg.Done()
+	h := sha256.New()
+
+	for pth := range tasks {
+		h.Reset()
+
+		file, err := os.Open(pth)
 		if err != nil {
-			slog.Error("make file hash error")
-			return err
+			slog.Error(err.Error())
+			continue
 		}
+
+		if _, err = io.Copy(h, file); err != nil {
+			file.Close()
+			slog.Error(err.Error())
+			continue
+		}
+		file.Close()
+
+		hashInBytes := h.Sum(nil)
+		hashRes := hex.EncodeToString(hashInBytes)
 
 		pth, err = filepath.Rel(rootPath, pth)
 		if err != nil {
 			slog.Error("file needs to be checked manually", "file", pth, "error", err)
-			return err
+			continue
 		}
-		res[pth] = fileHash
 
-		return nil
-	})
-
-	return res, err
-}
-
-func HashFile(pth string) (string, error) {
-	h := sha256.New()
-
-	file, err := os.Open(pth)
-	if err != nil {
-		return "", err
+		res <- FileResult{
+			Path: pth,
+			Hash: hashRes,
+		}
 	}
-	defer file.Close()
-
-	if _, err = io.Copy(h, file); err != nil {
-		return "", err
-	}
-
-	hashInBytes := h.Sum(nil)
-
-	return hex.EncodeToString(hashInBytes), nil
 }
