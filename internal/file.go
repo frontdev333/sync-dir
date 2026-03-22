@@ -12,18 +12,22 @@ import (
 	"sync"
 )
 
+const workersNum = 100
+
 type FileResult struct {
 	Path string
 	Hash string
 }
 
-func GetFilePath() (string, error) {
-	if len(os.Args) < 2 {
-		return "", errors.New("root path wasn't input")
+func GetPaths() (string, string, error) {
+	if len(os.Args) < 3 {
+		return "", "", errors.New("input source path and destination path")
 	}
 
-	pth := os.Args[1:]
-	return pth[0], nil
+	pths := os.Args[1:]
+	srcPth := pths[0]
+	destPth := pths[1]
+	return srcPth, destPth, nil
 }
 
 func ListFiles(res chan<- string, rootPath string) {
@@ -81,4 +85,53 @@ func HashFile(wg *sync.WaitGroup, res chan<- FileResult, tasks <-chan string, ro
 			Hash: hashRes,
 		}
 	}
+}
+
+func CompareScans(source, dest map[string]string) (toCopy []string, toUpdate []string, toDelete []string) {
+	for k, v := range source {
+		h, ok := dest[k]
+		if !ok {
+			toCopy = append(toCopy, k)
+			continue
+		}
+		if h != v {
+			toUpdate = append(toUpdate, k)
+			continue
+		}
+	}
+
+	for k, _ := range dest {
+		_, ok := source[k]
+		if !ok {
+			toDelete = append(toDelete, k)
+			continue
+		}
+	}
+
+	return toCopy, toUpdate, toDelete
+}
+
+func ScanDir(externalCh chan<- map[string]string, pth string) {
+	defer close(externalCh)
+
+	tasks := make(chan string)
+	results := make(chan FileResult)
+	finalMap := make(map[string]string)
+	wg := &sync.WaitGroup{}
+
+	for i := 0; i < workersNum; i++ {
+		wg.Add(1)
+		go HashFile(wg, results, tasks, pth)
+	}
+
+	go ListFiles(tasks, pth)
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for v := range results {
+		finalMap[v.Path] = v.Hash
+	}
+	externalCh <- finalMap
 }

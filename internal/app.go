@@ -3,35 +3,38 @@ package internal
 import (
 	"fmt"
 	"log/slog"
-	"sync"
 )
 
-const workersNum = 100
-
 func Run() {
-	tasks := make(chan string)
-	results := make(chan FileResult)
-	wg := &sync.WaitGroup{}
-
-	pth, err := GetFilePath()
+	srcPth, destPth, err := GetPaths()
 	if err != nil {
 		slog.Error(err.Error())
 		return
 	}
 
-	for i := 0; i < workersNum; i++ {
-		wg.Add(1)
-		go HashFile(wg, results, tasks, pth)
+	srcRes := make(chan map[string]string)
+	destRes := make(chan map[string]string)
+
+	go ScanDir(srcRes, srcPth)
+	go ScanDir(destRes, destPth)
+
+	srcMap := <-srcRes
+	destMap := <-destRes
+
+	toCopy, toUpdate, toDelete := CompareScans(srcMap, destMap)
+
+	fmt.Println("файлы для копирования:")
+	for _, v := range toCopy {
+		fmt.Println("- " + v)
 	}
 
-	go ListFiles(tasks, pth)
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	for v := range results {
-		fmt.Printf("%s: %s\n", v.Path, v.Hash)
+	fmt.Println("файлы для обновления:")
+	for _, v := range toUpdate {
+		fmt.Println("- " + v)
 	}
 
+	fmt.Println("файлы для удаления:")
+	for _, v := range toDelete {
+		fmt.Println("- " + v)
+	}
 }
