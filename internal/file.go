@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 )
 
 const workersNum = 100
@@ -17,6 +18,18 @@ const workersNum = 100
 type FileResult struct {
 	Path string
 	Hash string
+}
+
+type SyncTask struct {
+	Action string
+	Src    string
+	Dst    string
+}
+
+type FileCounter struct {
+	Del atomic.Int32
+	Upd atomic.Int32
+	Cp  atomic.Int32
 }
 
 func GetPaths() (string, string, error) {
@@ -134,4 +147,41 @@ func ScanDir(externalCh chan<- map[string]string, pth string) {
 		finalMap[v.Path] = v.Hash
 	}
 	externalCh <- finalMap
+}
+
+func CopyFile(srcPth, dstPth string) {
+	srcFile, err := os.Open(srcPth)
+	if err != nil {
+		slog.Error(err.Error())
+		return
+	}
+	defer srcFile.Close()
+
+	if err = os.MkdirAll(filepath.Dir(dstPth), 0755); err != nil {
+		slog.Error(err.Error())
+		return
+	}
+
+	dstFile, err := os.Create(dstPth)
+	if err != nil {
+		slog.Error(err.Error())
+		return
+	}
+	defer dstFile.Close()
+
+	if _, err = io.Copy(dstFile, srcFile); err != nil {
+		slog.Error(err.Error())
+		return
+	}
+}
+
+func DeleteFile(pth string) {
+	if err := os.Remove(pth); err != nil {
+		slog.Error(err.Error())
+	}
+}
+
+func UpdateFile(srcPth, dstPth string) {
+	DeleteFile(dstPth)
+	CopyFile(srcPth, dstPth)
 }
