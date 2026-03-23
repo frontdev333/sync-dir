@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+
+	"github.com/fatih/color"
+	"github.com/schollz/progressbar/v3"
 )
 
 const workersNum = 100
@@ -184,4 +187,26 @@ func DeleteFile(pth string) {
 func UpdateFile(srcPth, dstPth string) {
 	DeleteFile(dstPth)
 	CopyFile(srcPth, dstPth)
+}
+
+func Worker(wg *sync.WaitGroup, tasks <-chan SyncTask, counter *FileCounter, bar *progressbar.ProgressBar) {
+	defer wg.Done()
+
+	for t := range tasks {
+		bar.Add(1)
+		switch t.Action {
+		case "Update":
+			color.Yellow("[ОБНОВЛЕНИЕ] %s", filepath.Base(t.Dst))
+			UpdateFile(t.Src, t.Dst)
+			counter.Upd.Add(1)
+		case "Copy":
+			color.Green("[КОПИРУЮ] %s", filepath.Base(t.Src))
+			CopyFile(t.Src, t.Dst)
+			counter.Cp.Add(1)
+		case "Delete":
+			color.Red("[УДАЛЯЮ] %s", filepath.Base(t.Dst))
+			DeleteFile(t.Dst)
+			counter.Del.Add(1)
+		}
+	}
 }

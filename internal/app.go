@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+
+	"github.com/schollz/progressbar/v3"
 )
 
 func Run() {
@@ -28,12 +30,14 @@ func Run() {
 	tasks := make(chan SyncTask)
 	wg := &sync.WaitGroup{}
 	counter := &FileCounter{}
+	bar := progressbar.Default(int64(len(toCopy) + len(toDelete) + len(toUpdate)))
 
 	for i := 0; i < workersNum; i++ {
 		wg.Add(1)
-		go worker(wg, tasks, counter)
+		go Worker(wg, tasks, counter, bar)
 	}
 
+	fmt.Println("Синхронизация...")
 	for _, v := range toCopy {
 		copyDest := filepath.Join(destPth, v)
 		v = filepath.Join(srcPth, v)
@@ -70,25 +74,4 @@ func Run() {
 	fmt.Println("Скопировано:", counter.Cp.Load())
 	fmt.Println("Обновлено:", counter.Upd.Load())
 	fmt.Println("Удалено:", counter.Del.Load())
-}
-
-func worker(wg *sync.WaitGroup, tasks <-chan SyncTask, counter *FileCounter) {
-	defer wg.Done()
-
-	for t := range tasks {
-		switch t.Action {
-		case "Update":
-			slog.Info("Обновляю", "file", t.Dst)
-			UpdateFile(t.Src, t.Dst)
-			counter.Upd.Add(1)
-		case "Copy":
-			slog.Info("Копирую", "file", t.Src)
-			CopyFile(t.Src, t.Dst)
-			counter.Cp.Add(1)
-		case "Delete":
-			slog.Info("Удаляю", "file", t.Dst)
-			DeleteFile(t.Dst)
-			counter.Del.Add(1)
-		}
-	}
 }
